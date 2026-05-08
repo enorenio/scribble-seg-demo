@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scribble Segmentation — Method Comparison</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #181b22;
+    --panel2: #1f232c;
+    --border: #2a2f3a;
+    --text: #e9ecf1;
+    --muted: #98a2b3;
+    --accent: #4ade80;
+    --accent2: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+  }
+  header {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 12px 18px;
+    backdrop-filter: blur(8px);
+  }
+  .h-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  h1 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); }
+  .meta { color: var(--muted); font-size: 12px; }
+  select, input[type="text"], button {
+    background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 9px; font-size: 13px;
+    font-family: inherit;
+  }
+  select:hover, button:hover { border-color: #4a5060; }
+  label.method-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 8px; border-radius: 6px;
+    background: var(--panel2); border: 1px solid var(--border);
+    cursor: pointer; user-select: none;
+    font-size: 12px;
+  }
+  label.method-toggle input { margin: 0; cursor: pointer; }
+  .summary-bar {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    padding: 10px 18px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .summary-bar b { color: var(--text); }
+  main { padding: 14px; }
+  .grid { display: flex; flex-direction: column; gap: 18px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px;
+  }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    margin-bottom: 10px;
+  }
+  .card-stem { font-weight: 600; }
+  .card-metrics { color: var(--muted); font-size: 12px; }
+  .card-metrics b { color: var(--text); font-weight: 600; }
+  .card-metrics .miou-good { color: var(--accent); }
+  .card-metrics .miou-bad  { color: #f87171; }
+  .panels { display: grid; gap: 8px; }
+  .panel {
+    background: #0a0c10; border-radius: 6px; overflow: hidden;
+    cursor: pointer; transition: transform 0.1s;
+    position: relative;
+    border: 1px solid #2a2f3a;
+  }
+  .panel:hover { transform: scale(1.03); border-color: #4a5060; }
+  .panel img { width: 100%; height: auto; display: block; }
+  .panel-label {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.65); color: #fff;
+    padding: 3px 6px; font-size: 10.5px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel-label .miou { font-variant-numeric: tabular-nums; }
+  /* lightbox */
+  .lightbox {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+    z-index: 100; display: none;
+    flex-direction: column; align-items: center; justify-content: center;
+    padding: 30px;
+  }
+  .lightbox.show { display: flex; }
+  .lightbox img { max-width: 95%; max-height: 90vh; object-fit: contain; border-radius: 6px; }
+  .lightbox .lb-caption {
+    color: #fff; margin-top: 12px; font-size: 13px;
+  }
+  .lightbox .lb-close {
+    position: absolute; top: 16px; right: 20px;
+    color: #fff; font-size: 24px; cursor: pointer; user-select: none;
+  }
+  .empty {
+    color: var(--muted); text-align: center; padding: 60px 20px;
+  }
+  .legend {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-right: 12px; font-size: 11px; color: var(--muted);
+  }
+  .legend .dot {
+    width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+  }
+  /* Stats panel: explicit grid so columns can't pile up at ambiguous widths */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "hist scatter"
+      "h2h h2h";
+    gap: 18px;
+    align-items: stretch;
+  }
+  .stats-grid > .stats-cell:nth-child(1) { grid-area: hist; }
+  .stats-grid > .stats-cell:nth-child(2) { grid-area: scatter; }
+  .stats-grid > .stats-cell:nth-child(3) { grid-area: h2h; }
+  @media (max-width: 720px) {
+    .stats-grid { grid-template-columns: 1fr; grid-template-areas: "hist" "scatter" "h2h"; }
+  }
+  .stats-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .stats-caption { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .stats-canvas {
+    width: 100%;
+    height: 280px;
+    display: block;
+    background: #0a0c10;
+    border-radius: 6px;
+  }
+  .stats-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .stats-table th { padding: 4px; font-size: 10.5px; text-align: center; color: var(--muted); }
+  .stats-table th:first-child { text-align: right; }
+  .stats-table td { padding: 4px; text-align: center; font-variant-numeric: tabular-nums; }
+  .stats-canvas { cursor: crosshair; }
+  .scatter-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: rgba(20, 24, 32, 0.95);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 9px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: none;
+    z-index: 60;
+  }
+  .scatter-tooltip b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .scatter-tooltip .stem-line { font-weight: 600; margin-bottom: 3px; }
+  /* View tab strip */
+  .view-tabs {
+    display: inline-flex; gap: 4px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .view-tab {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    font-family: inherit;
+  }
+  .view-tab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  .view-tab.is-active {
+    background: var(--accent);
+    color: #0f1115;
+    font-weight: 600;
+  }
+  .view-tab.is-active:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="h-row">
+    <h1>Scribble Segmentation — Method Comparison</h1>
+    <span class="meta" id="counter"></span>
+  </div>
+  <div class="h-row" style="margin-top: 10px">
+    <label>Dataset
+      <select id="dataset">
+        <option value="train">train (228, with GT)</option>
+        <option value="test1">test1 (226)</option>
+        <option value="test2">test2 (228)</option>
+      </select>
+    </label>
+    <label>Sort
+      <select id="sort">
+        <option value="name">name (a-z)</option>
+        <option value="miou_desc">mIoU (high → low)</option>
+        <option value="miou_asc">mIoU (low → high) — find failures</option>
+        <option value="fg_desc">fg IoU (high → low)</option>
+        <option value="fg_asc">fg IoU (low → high)</option>
+      </select>
+    </label>
+    <input id="search" type="text" placeholder="search stem..." size="15">
+    <span id="method-toggles"></span>
+    <label class="method-toggle"><input type="checkbox" id="show-gt" checked>GT (train)</label>
+    <label class="method-toggle"><input type="checkbox" id="big-mode">Bigger</label>
+  </div>
+  <div class="h-row" style="margin-top: 10px">
+    <div class="view-tabs" role="tablist">
+      <button class="view-tab is-active" data-view="common" role="tab">🗂 Common</button>
+      <button class="view-tab" data-view="worst" role="tab">🚧 Hardest 5</button>
+      <button class="view-tab" data-view="stats" role="tab">📊 Stats</button>
+    </div>
+    <span class="meta" id="view-hint"></span>
+  </div>
+</header>
+
+<div class="summary-bar" id="summary-bar"></div>
+
+<div id="stats-panel" style="display:none; padding: 14px 18px; background: var(--panel); border-bottom: 1px solid var(--border);">
+  <div class="stats-grid">
+    <div class="stats-cell">
+      <div class="stats-title">Quality curve: each method's images ranked best → worst</div>
+      <canvas id="hist-canvas" class="stats-canvas"></canvas>
+      <div class="stats-caption">For each method we take its 228 per-image mIoU scores and sort them best-first, then plot. Read: "the top N images for method X all scored ≥ Y mIoU." Higher curves = better. The gap on the right side (worst images) shows how each method handles its hardest cases — that's where pseudo-labeling helped V4+V7 most.</div>
+    </div>
+    <div class="stats-cell" style="position:relative">
+      <div class="stats-title">Per-image quality: foreground IoU vs background IoU (V4+V7, train)</div>
+      <canvas id="scatter-canvas" class="stats-canvas"></canvas>
+      <div id="scatter-tooltip" class="scatter-tooltip"></div>
+      <div class="stats-caption">Each dot = one of 228 train images. Top-right corner = perfect. Dashed diagonal = bg IoU equals fg IoU. Most dots are below the diagonal — that's the structural pattern that bg is easier than fg in this dataset. Hover for details, click to jump.</div>
+    </div>
+    <div class="stats-cell">
+      <div class="stats-title">Method-vs-method head-to-head (train)</div>
+      <table id="h2h" class="stats-table"></table>
+      <div class="stats-caption">Each cell: % of images where row method has higher mIoU than column.</div>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div id="grid" class="grid"></div>
+</main>
+
+<div class="lightbox" id="lightbox">
+  <span class="lb-close" id="lb-close">×</span>
+  <img id="lb-img" src="">
+  <div class="lb-caption" id="lb-caption"></div>
+</div>
+
+<script>
+const COLOR_DOTS = {
+  scribble: ['#ff1e1e', '#1eff1e'],   // red, green
+  knn: '#ff5a5a',
+  v1:  '#5ac8ff',
+  v3:  '#8c64ff',
+  v4:  '#ffa500',
+  v3v4: '#28c864',
+  v4v7: '#ffd700',
+  gt:  '#28dc5a',
+};
+
+let DATA = null;
+let currentSet = "train";
+let currentSort = "name";
+let visibleMethods = new Set();
+let showGT = true;
+let searchQuery = "";
+let bigMode = false;
+let SCATTER_POINTS = [];   // populated by renderStats(); used for hit-testing
+let currentView = "common"; // one of: "common", "worst", "stats"
+
+// Hardest 5 train images by mean mIoU across all methods (computed once offline).
+const HARDEST_STEMS = [
+  "2009_002972",  // mean 0.276 — black-and-white cat on couch, low light
+  "2009_002153",  // mean 0.443 — parrots in dark cage
+  "2008_006389",  // mean 0.500 — dark blue sofa on dark floor
+  "2008_004758",  // mean 0.507 — bicycle in cluttered junkyard
+  "2008_005770",  // mean 0.508 — tabby cat being petted
+];
+
+function switchView(view) {
+  if (view === currentView) return;
+  currentView = view;
+  // Update tab visual state
+  for (const btn of document.querySelectorAll(".view-tab")) {
+    btn.classList.toggle("is-active", btn.dataset.view === view);
+  }
+  // Show/hide panels
+  const statsPanel = document.getElementById("stats-panel");
+  const grid = document.getElementById("grid");
+  const summaryBar = document.getElementById("summary-bar");
+  const hint = document.getElementById("view-hint");
+  if (view === "stats") {
+    statsPanel.style.display = "block";
+    grid.style.display = "none";
+    summaryBar.style.display = "flex";
+    hint.textContent = "Aggregate plots across all 228 train images.";
+    renderStats();
+  } else if (view === "worst") {
+    statsPanel.style.display = "none";
+    grid.style.display = "flex";
+    summaryBar.style.display = "none";
+    hint.textContent = "5 universally hardest train images (lowest mean mIoU across all methods).";
+    render();
+  } else {
+    // common
+    statsPanel.style.display = "none";
+    grid.style.display = "flex";
+    summaryBar.style.display = "flex";
+    hint.textContent = "";
+    render();
+  }
+}
+
+function setupScatterInteractions() {
+  const cv = document.getElementById("scatter-canvas");
+  const tooltip = document.getElementById("scatter-tooltip");
+
+  // Find the nearest plotted point to (mouseX, mouseY) within HIT_RADIUS px
+  function nearestPoint(mx, my, radius = 8) {
+    let best = null, bestD2 = radius * radius;
+    for (const p of SCATTER_POINTS) {
+      const dx = p.x - mx, dy = p.y - my;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD2) { bestD2 = d2; best = p; }
+    }
+    return best;
+  }
+
+  cv.addEventListener("mousemove", e => {
+    if (SCATTER_POINTS.length === 0) return;
+    const rect = cv.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const hit = nearestPoint(mx, my);
+    if (!hit) {
+      tooltip.style.display = "none";
+      cv.style.cursor = "crosshair";
+      return;
+    }
+    cv.style.cursor = "pointer";
+    // Build tooltip content: stem, then per-method mIoU
+    const it = hit.item;
+    const mLines = DATA.methods.map(m => {
+      const r = it.metrics?.[m];
+      if (!r || r.miou === undefined) return null;
+      const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COLOR_DOTS[m] || '#fff'};margin-right:5px"></span>`;
+      return `<div>${dot}${m}: <b>${r.miou.toFixed(3)}</b> (bg ${r.bg_iou.toFixed(2)} fg ${r.fg_iou.toFixed(2)})</div>`;
+    }).filter(Boolean).join("");
+    tooltip.innerHTML = `<div class="stem-line">${it.stem}</div>${mLines}<div style="font-size:10px;color:var(--muted);margin-top:4px">click to jump to image</div>`;
+    tooltip.style.display = "block";
+    // Position tooltip; flip to left side if near right edge
+    const tooltipW = tooltip.offsetWidth;
+    let left = mx + 12;
+    if (left + tooltipW > rect.width) left = mx - tooltipW - 12;
+    tooltip.style.left = left + "px";
+    tooltip.style.top = Math.max(8, my - 8) + "px";
+  });
+  cv.addEventListener("mouseleave", () => {
+    tooltip.style.display = "none";
+    cv.style.cursor = "crosshair";
+  });
+  cv.addEventListener("click", e => {
+    const rect = cv.getBoundingClientRect();
+    const hit = nearestPoint(e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit) return;
+    // If we're not in 'train' set, switch to it (scatter is train-only)
+    if (currentSet !== "train") {
+      currentSet = "train";
+      document.getElementById("dataset").value = "train";
+      render();
+    }
+    // Defer scroll until grid re-render completes
+    requestAnimationFrame(() => {
+      const card = document.getElementById(`card-${hit.item.stem}`);
+      if (card) {
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Brief highlight pulse
+        card.style.transition = "box-shadow 0.6s ease-out";
+        card.style.boxShadow = "0 0 0 3px var(--accent)";
+        setTimeout(() => { card.style.boxShadow = ""; }, 1500);
+      }
+    });
+  });
+}
+
+async function init() {
+  DATA = await fetch("data.json").then(r => r.json());
+  // Populate method toggles
+  const togglesEl = document.getElementById("method-toggles");
+  togglesEl.innerHTML = "";
+  for (const m of DATA.methods) {
+    const meta = DATA.method_meta[m];
+    const id = "m_" + m;
+    const lbl = document.createElement("label");
+    lbl.className = "method-toggle";
+    lbl.innerHTML = `<input type="checkbox" id="${id}" checked> <span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COLOR_DOTS[m] || '#fff'}"></span> ${meta.name}`;
+    togglesEl.appendChild(lbl);
+    visibleMethods.add(m);
+    lbl.querySelector("input").addEventListener("change", e => {
+      if (e.target.checked) visibleMethods.add(m); else visibleMethods.delete(m);
+      render();
+    });
+  }
+  // Summary bar
+  const sb = document.getElementById("summary-bar");
+  const summary = DATA.summary || {};
+  const parts = ["<b>Summary on TRAIN (avg over 228 images):</b>"];
+  for (const m of DATA.methods) {
+    if (summary[m]) {
+      parts.push(`<span><span class="dot" style="background:${COLOR_DOTS[m] || '#fff'}; width:8px; height:8px; display:inline-block; border-radius:2px"></span> <b>${DATA.method_meta[m].name}</b>: mIoU=<b>${summary[m].mean_miou.toFixed(4)}</b> | bg=${summary[m].mean_bg_iou.toFixed(3)} fg=${summary[m].mean_fg_iou.toFixed(3)}</span>`);
+    }
+  }
+  sb.innerHTML = parts.join("&nbsp;&nbsp;|&nbsp;&nbsp;");
+
+  // View tabs (Common / Worst / Stats) — mutually exclusive
+  for (const btn of document.querySelectorAll(".view-tab")) {
+    btn.addEventListener("click", () => switchView(btn.dataset.view));
+  }
+
+  // Re-render stats canvases when the window resizes (debounced)
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    if (currentView !== "stats") return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(renderStats, 120);
+  });
+
+  // Scatter hover + click — reads SCATTER_POINTS populated by renderStats()
+  setupScatterInteractions();
+
+  document.getElementById("dataset").addEventListener("change", e => { currentSet = e.target.value; render(); });
+  document.getElementById("sort").addEventListener("change", e => { currentSort = e.target.value; render(); });
+  document.getElementById("search").addEventListener("input", e => { searchQuery = e.target.value.trim().toLowerCase(); render(); });
+  document.getElementById("show-gt").addEventListener("change", e => { showGT = e.target.checked; render(); });
+  document.getElementById("big-mode").addEventListener("change", e => { bigMode = e.target.checked; render(); });
+
+  // Lightbox
+  document.getElementById("lb-close").addEventListener("click", closeLightbox);
+  document.getElementById("lightbox").addEventListener("click", e => {
+    if (e.target.id === "lightbox") closeLightbox();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") closeLightbox();
+  });
+
+  render();
+}
+
+function openLightbox(src, caption) {
+  const lb = document.getElementById("lightbox");
+  document.getElementById("lb-img").src = src;
+  document.getElementById("lb-caption").textContent = caption;
+  lb.classList.add("show");
+}
+function closeLightbox() {
+  document.getElementById("lightbox").classList.remove("show");
+}
+
+function render() {
+  const refMethod = "v4v7"; // canonical: the final ensemble
+
+  // In "worst" view, force train + filter to the 5 hardest stems, ignore search/sort UI.
+  let items;
+  if (currentView === "worst") {
+    const trainItems = DATA.sets["train"] || [];
+    const byStem = Object.fromEntries(trainItems.map(it => [it.stem, it]));
+    items = HARDEST_STEMS.map(s => byStem[s]).filter(Boolean);
+  } else {
+    items = (DATA.sets[currentSet] || []).filter(it =>
+      !searchQuery || it.stem.toLowerCase().includes(searchQuery)
+    );
+  }
+
+  // Sort (skipped in 'worst' view — items already in hardest-first order)
+  const sorted = [...items];
+  if (currentView !== "worst") {
+    const getMiou = it => it.metrics?.[refMethod]?.miou;
+    const getFg   = it => it.metrics?.[refMethod]?.fg_iou;
+    if (currentSort === "miou_desc") sorted.sort((a,b) => (getMiou(b)??-1) - (getMiou(a)??-1));
+    else if (currentSort === "miou_asc")  sorted.sort((a,b) => (getMiou(a)??2) - (getMiou(b)??2));
+    else if (currentSort === "fg_desc")   sorted.sort((a,b) => (getFg(b)??-1) - (getFg(a)??-1));
+    else if (currentSort === "fg_asc")    sorted.sort((a,b) => (getFg(a)??2) - (getFg(b)??2));
+    else sorted.sort((a,b) => a.stem.localeCompare(b.stem));
+  }
+
+  document.getElementById("counter").textContent = `${sorted.length} / ${items.length} images`;
+
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+  if (sorted.length === 0) {
+    grid.innerHTML = `<div class="empty">No images match the filter.</div>`;
+    return;
+  }
+
+  // For each image, build a card
+  for (const it of sorted) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.id = `card-${it.stem}`;  // for scatter-click scrolling
+
+    // Head: stem + best method's mIoU
+    const refRec = it.metrics?.[refMethod] || {};
+    const refMiou = refRec.miou;
+    let metricsHtml = "";
+    if (refMiou !== undefined) {
+      const cls = refMiou > 0.7 ? "miou-good" : (refMiou < 0.5 ? "miou-bad" : "");
+      metricsHtml = `<span class="card-metrics">${DATA.method_meta[refMethod].name} mIoU: <b class="${cls}">${refMiou.toFixed(3)}</b> &nbsp;|&nbsp; bg <b>${refRec.bg_iou.toFixed(3)}</b> fg <b>${refRec.fg_iou.toFixed(3)}</b></span>`;
+    }
+    card.innerHTML = `<div class="card-head">
+        <div class="card-stem">${it.stem}</div>
+        ${metricsHtml}
+    </div>`;
+
+    // Build panels: original, scribble, methods..., gt(train)
+    const panelDefs = [
+      { key: "orig",     label: "image",     src: `${currentSet}/${it.stem}_orig.jpg` },
+      { key: "scribble", label: "scribbles", src: `${currentSet}/${it.stem}_scribble.jpg` },
+    ];
+    for (const m of DATA.methods) {
+      if (visibleMethods.has(m)) {
+        panelDefs.push({
+          key: m, label: DATA.method_meta[m].name,
+          src: `${currentSet}/${it.stem}_${m}.jpg`,
+          method: m,
+          metrics: it.metrics?.[m] || {},
+        });
+      }
+    }
+    if (it.has_gt && showGT) {
+      panelDefs.push({ key: "gt", label: "ground truth", src: `${currentSet}/${it.stem}_gt.jpg` });
+    }
+
+    const panelsEl = document.createElement("div");
+    panelsEl.className = "panels";
+    const colW = bigMode ? "minmax(380px, 1fr)" : "minmax(220px, 1fr)";
+    panelsEl.style.gridTemplateColumns = `repeat(auto-fit, ${colW})`;
+    for (const pd of panelDefs) {
+      const div = document.createElement("div");
+      div.className = "panel";
+      let labelText = pd.label;
+      if (pd.metrics && pd.metrics.miou !== undefined) {
+        labelText = `<span>${pd.label}</span><span class="miou">${pd.metrics.miou.toFixed(3)}</span>`;
+      } else {
+        labelText = `<span>${pd.label}</span><span></span>`;
+      }
+      div.innerHTML = `<img src="${pd.src}" loading="lazy" alt="${pd.key}">
+                       <div class="panel-label">${labelText}</div>`;
+      div.addEventListener("click", () => openLightbox(pd.src, `${it.stem} — ${pd.label}`));
+      panelsEl.appendChild(div);
+    }
+    card.appendChild(panelsEl);
+    grid.appendChild(card);
+  }
+}
+
+// Resize a canvas to its actual displayed CSS pixel size, with devicePixelRatio
+// for sharpness on hi-DPI screens. Returns (ctx, W, H) where W/H are CSS pixels —
+// drawing code can ignore DPR because we transform the context.
+function setupCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect();
+  const W = Math.max(1, Math.round(rect.width));
+  const H = Math.max(1, Math.round(rect.height));
+  cv.width = W * dpr;
+  cv.height = H * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // 1 unit = 1 CSS pixel
+  ctx.clearRect(0, 0, W, H);
+  return { ctx, W, H };
+}
+
+function renderStats() {
+  const trainItems = DATA.sets.train || [];
+  if (trainItems.length === 0) return;
+  const methods = DATA.methods;
+
+  // ---- Quality curve: each method's 228 images sorted best-first
+  {
+    const cv = document.getElementById("hist-canvas");
+    const { ctx, W, H } = setupCanvas(cv);
+
+    // For each method, collect per-image mIoU and sort descending
+    const sortedScores = {};
+    const means = {};
+    methods.forEach(m => {
+      const vals = [];
+      for (const it of trainItems) {
+        const v = it.metrics?.[m]?.miou;
+        if (v !== undefined) vals.push(v);
+      }
+      vals.sort((a, b) => b - a);
+      sortedScores[m] = vals;
+      means[m] = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+    });
+    const N = Math.max(...methods.map(m => sortedScores[m].length), 1);
+
+    const padL = 46, padR = 14, padT = 16, padB = 42;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+
+    // Plot box
+    ctx.strokeStyle = "#2a2f3a"; ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, plotW, plotH);
+
+    // Y-axis: mIoU 0..1 with reference grid
+    ctx.fillStyle = "#98a2b3"; ctx.font = "10px sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let v = 0; v <= 1.001; v += 0.2) {
+      const y = padT + plotH - v * plotH;
+      ctx.fillText(v.toFixed(1), padL - 6, y);
+      ctx.strokeStyle = "#1d212a"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+    }
+
+    // X-axis: image rank 0..N-1
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const xTicks = [0, Math.round(N * 0.25), Math.round(N * 0.5), Math.round(N * 0.75), N - 1];
+    xTicks.forEach(rank => {
+      const x = padL + (rank / Math.max(1, N - 1)) * plotW;
+      ctx.fillStyle = "#98a2b3";
+      ctx.fillText(String(rank + 1), x, padT + plotH + 6);  // 1-indexed
+      ctx.strokeStyle = "#2a2f3a";
+      ctx.beginPath(); ctx.moveTo(x, padT + plotH); ctx.lineTo(x, padT + plotH + 3); ctx.stroke();
+    });
+
+    // Axis labels
+    ctx.fillStyle = "#cfd5e1"; ctx.font = "11px sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.fillText(`Image rank (1 = method's best image, ${N} = its worst)`, padL + plotW / 2, H - 6);
+    ctx.save();
+    ctx.translate(12, padT + plotH / 2); ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText("mIoU on that image", 0, 0);
+    ctx.restore();
+
+    // Draw curves
+    methods.forEach(m => {
+      const vals = sortedScores[m];
+      if (vals.length === 0) return;
+      const color = COLOR_DOTS[m] || "#fff";
+      ctx.strokeStyle = color; ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let i = 0; i < vals.length; i++) {
+        const x = padL + (i / Math.max(1, vals.length - 1)) * plotW;
+        const y = padT + plotH - vals[i] * plotH;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    });
+
+    // Legend (top-right) with mean per method
+    ctx.font = "10.5px sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    let ly = padT + 8;
+    methods.forEach(m => {
+      ctx.fillStyle = COLOR_DOTS[m] || "#fff";
+      ctx.fillRect(padL + plotW - 178, ly - 4, 10, 8);
+      ctx.fillStyle = "#e9ecf1";
+      ctx.fillText(`${DATA.method_meta[m].name} (mean ${means[m].toFixed(3)})`, padL + plotW - 164, ly);
+      ly += 14;
+    });
+
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  }
+
+  // ---- fg vs bg IoU scatter for V3+V4
+  {
+    const cv = document.getElementById("scatter-canvas");
+    const { ctx, W, H } = setupCanvas(cv);
+    const padL = 38, padR = 12, padT = 12, padB = 28;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    ctx.strokeStyle = "#2a2f3a"; ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, plotW, plotH);
+    ctx.fillStyle = "#98a2b3"; ctx.font = "10px sans-serif";
+    for (let t = 0; t <= 1; t += 0.25) {
+      const x = padL + t * plotW;
+      const y = padT + plotH - t * plotH;
+      ctx.fillText(t.toFixed(2), x - 8, H - padB + 14);
+      ctx.fillText(t.toFixed(2), 4, y + 4);
+    }
+    ctx.fillText("bg IoU", W / 2 - 14, H - 4);
+    ctx.save(); ctx.translate(10, H/2 + 12); ctx.rotate(-Math.PI/2);
+    ctx.fillText("fg IoU", 0, 0); ctx.restore();
+    // Diagonal reference
+    ctx.strokeStyle = "#3a4050"; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT); ctx.stroke();
+    ctx.setLineDash([]);
+    // Points (use V4+V7 — our final ensemble)
+    const refForScatter = "v4v7";
+    SCATTER_POINTS = [];  // (x, y) in CSS pixels relative to canvas, plus item ref
+    for (const it of trainItems) {
+      const r = it.metrics?.[refForScatter];
+      if (r) {
+        const x = padL + r.bg_iou * plotW;
+        const y = padT + plotH - r.fg_iou * plotH;
+        ctx.fillStyle = "rgba(255, 215, 0, 0.55)";
+        ctx.beginPath(); ctx.arc(x, y, 2.5, 0, 2 * Math.PI); ctx.fill();
+        SCATTER_POINTS.push({ x, y, item: it });
+      }
+    }
+  }
+
+  // ---- Method-vs-method head-to-head table
+  {
+    const tbl = document.getElementById("h2h");
+    const winRate = (rowM, colM) => {
+      let w = 0, t = 0;
+      for (const it of trainItems) {
+        const a = it.metrics?.[rowM]?.miou, b = it.metrics?.[colM]?.miou;
+        if (a !== undefined && b !== undefined) {
+          t++;
+          if (a > b + 1e-6) w++;
+        }
+      }
+      return t > 0 ? w / t : null;
+    };
+    let html = "<tr><th></th>";
+    for (const m of methods) html += `<th>${m}</th>`;
+    html += "</tr>";
+    for (const r of methods) {
+      html += `<tr><th>${r}</th>`;
+      for (const c of methods) {
+        if (r === c) { html += `<td style="color:#3a4050">—</td>`; continue; }
+        const wr = winRate(r, c);
+        const pct = wr === null ? "-" : (wr * 100).toFixed(0) + "%";
+        const color = wr === null ? "" : (wr > 0.55 ? "#4ade80" : (wr < 0.45 ? "#f87171" : "#98a2b3"));
+        html += `<td style="color:${color}">${pct}</td>`;
+      }
+      html += "</tr>";
+    }
+    tbl.innerHTML = html;
+  }
+}
+
+init().catch(err => {
+  document.getElementById("grid").innerHTML = `<div class="empty">Failed to load data.json: ${err}</div>`;
+});
+</script>
+
+</body>
+</html>
