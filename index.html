@@ -183,6 +183,77 @@
     font-weight: 600;
   }
   .view-tab.is-active:hover { background: var(--accent); }
+  .link-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    font-family: inherit;
+  }
+  .link-btn:hover { color: var(--text); border-color: #4a5060; }
+  /* Methods modal */
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none; align-items: flex-start; justify-content: center;
+    z-index: 110;
+    padding: 60px 20px 20px;
+    overflow-y: auto;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    max-width: 880px;
+    width: 100%;
+    padding: 26px 30px;
+    color: var(--text);
+    position: relative;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.5);
+  }
+  .modal h2 { margin: 0 0 8px; font-size: 18px; }
+  .modal .lead { color: var(--muted); font-size: 13px; margin-bottom: 20px; line-height: 1.55; }
+  .modal-close {
+    position: absolute; top: 12px; right: 16px;
+    color: var(--muted); font-size: 24px; cursor: pointer;
+    user-select: none; line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+  .method-list { display: flex; flex-direction: column; gap: 14px; }
+  .method-item {
+    display: grid;
+    grid-template-columns: 14px 130px 1fr 70px;
+    gap: 12px; align-items: baseline;
+    padding: 10px 12px;
+    background: var(--panel2);
+    border-radius: 8px;
+    border-left: 3px solid var(--border);
+  }
+  .method-item .swatch {
+    width: 12px; height: 12px; border-radius: 3px; align-self: center;
+  }
+  .method-item .m-name { font-weight: 600; font-size: 13.5px; }
+  .method-item .m-desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+  .method-item .m-miou {
+    font-variant-numeric: tabular-nums; font-size: 12.5px; text-align: right;
+    color: var(--accent2); font-weight: 600;
+  }
+  .method-item.final { border-left-color: var(--accent); background: rgba(74, 222, 128, 0.06); }
+  .method-item.final .m-name::after {
+    content: " — FINAL"; font-size: 10px; color: var(--accent);
+    letter-spacing: 1px;
+  }
+  @media (max-width: 600px) {
+    .method-item { grid-template-columns: 14px 1fr; }
+    .method-item .m-name { grid-column: 2; }
+    .method-item .m-desc { grid-column: 1 / -1; padding-left: 26px; }
+    .method-item .m-miou { grid-column: 1 / -1; padding-left: 26px; }
+  }
 </style>
 </head>
 <body>
@@ -190,6 +261,7 @@
 <header>
   <div class="h-row">
     <h1>Scribble Segmentation — Method Comparison</h1>
+    <button id="about-methods" class="link-btn" title="Show what each method is">ℹ️ About methods</button>
     <span class="meta" id="counter"></span>
   </div>
   <div class="h-row" style="margin-top: 10px">
@@ -255,6 +327,20 @@
   <span class="lb-close" id="lb-close">×</span>
   <img id="lb-img" src="">
   <div class="lb-caption" id="lb-caption"></div>
+</div>
+
+<div class="modal-bg" id="methods-modal">
+  <div class="modal" role="dialog" aria-labelledby="methods-modal-title">
+    <span class="modal-close" id="methods-modal-close">×</span>
+    <h2 id="methods-modal-title">Methods compared</h2>
+    <p class="lead">
+      The challenge: predict per-pixel foreground/background masks given an image and sparse user "scribbles" (small markings of bg=0 / fg=1, with most pixels unlabeled). Below is each method we tried, in chronological order. Train mIoU is the average over 228 training images, computed honestly out-of-fold for the deep models.
+    </p>
+    <div class="method-list" id="methods-list"></div>
+    <p class="lead" style="margin-top: 22px; margin-bottom: 0">
+      <b>Big-picture progression</b>: the project's reported baseline (KNN k=11) achieved 0.499 mIoU. Switching to a globally-trained U-Net with full ground-truth supervision instead of per-image scribble-only learning was the single biggest jump (+0.29). CutMix augmentation, model ensembling, and finally pseudo-labeling each added a few more points — total: <b>0.499 → 0.843</b>.
+    </p>
+  </div>
 </div>
 
 <script>
@@ -451,10 +537,62 @@ async function init() {
     if (e.target.id === "lightbox") closeLightbox();
   });
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") closeLightbox();
+    if (e.key === "Escape") {
+      closeLightbox();
+      closeMethodsModal();
+    }
+  });
+
+  // Methods modal — populate once, then wire up open/close
+  populateMethodsModal();
+  document.getElementById("about-methods").addEventListener("click", openMethodsModal);
+  document.getElementById("methods-modal-close").addEventListener("click", closeMethodsModal);
+  document.getElementById("methods-modal").addEventListener("click", e => {
+    if (e.target.id === "methods-modal") closeMethodsModal();
   });
 
   render();
+}
+
+// Method descriptions for the "About methods" modal
+const METHOD_DESCRIPTIONS = {
+  knn: "Per-image K-Nearest Neighbors (k=11) on (RGB + spatial) features. The project's reported baseline. Each image is treated independently — only the 1-3% of pixels marked by scribbles are used to label the rest. No cross-image learning.",
+  v1: "First deep model: a U-Net trained from scratch globally on all 228 train images, using full ground-truth masks as supervision. Inputs: RGB + 2-channel scribble encoding. Base channels=48, 80 epochs. The single biggest jump (+0.29 mIoU over KNN) — switching from per-image weak supervision to global full supervision.",
+  v3: "U-Net with more capacity (base=64) trained for 150 epochs, plus CutMix augmentation: random rectangles from one image are pasted into another (with their masks/scribbles) so the network sees novel context combinations. CutMix is what closes the gap on small datasets — 228 images is too few; CutMix synthetically expands the diversity. Seed = 43.",
+  v4: "Same recipe as V3, but a different random seed (44). Models with the same architecture but different seeds make different errors on hard images. Pairing them in an ensemble (V3+V4 below) smooths those errors out.",
+  v3v4: "Soft-vote ensemble of V3 and V4: average their sigmoid probabilities, then apply a learned per-image threshold. The threshold is a 5-feature linear regression that predicts the optimal cutoff for each image (some images need 0.4, others 0.6). Two seed-twin models combined this way recover most of the variance reduction you'd get from 5+ models.",
+  v4v7: "V7 was trained the same way as V3/V4 but ALSO included pseudo-labels from V3+V4's predictions on test1+test2 — turning ~454 unlabeled images into noisy training data. Even at 17% label noise, the extra diversity outweighed the noise. V4+V7 is the final ensemble — V4 (clean training) + V7 (data-augmented training) are the most error-diverse pair we found."
+};
+
+function populateMethodsModal() {
+  const list = document.getElementById("methods-list");
+  if (!DATA) return;
+  const summary = DATA.summary || {};
+  const methods = DATA.methods;
+  let html = "";
+  for (const m of methods) {
+    const meta = DATA.method_meta[m] || { name: m };
+    const desc = METHOD_DESCRIPTIONS[m] || "(no description)";
+    const miou = summary[m]?.mean_miou;
+    const mioustr = miou !== undefined ? miou.toFixed(3) : "—";
+    const colorHex = COLOR_DOTS[m] || "#fff";
+    const isFinal = m === "v4v7" ? "final" : "";
+    html += `
+      <div class="method-item ${isFinal}">
+        <span class="swatch" style="background:${colorHex}"></span>
+        <span class="m-name">${meta.name}</span>
+        <span class="m-desc">${desc}</span>
+        <span class="m-miou" title="train mIoU">${mioustr}</span>
+      </div>`;
+  }
+  list.innerHTML = html;
+}
+
+function openMethodsModal() {
+  document.getElementById("methods-modal").classList.add("show");
+}
+function closeMethodsModal() {
+  document.getElementById("methods-modal").classList.remove("show");
 }
 
 function openLightbox(src, caption) {
